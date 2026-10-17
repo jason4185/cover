@@ -5,6 +5,7 @@ import {
   Link,
   Outlet,
   Scripts,
+  type ErrorComponentProps,
   useRouter,
 } from "@tanstack/react-router";
 import { useEffect, type ReactNode } from "react";
@@ -26,14 +27,15 @@ function NotFound() {
   );
 }
 
-function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
+function ErrorComponent({ error, reset }: ErrorComponentProps) {
   const router = useRouter();
+  const errorMessage = error instanceof Error ? error.message : String(error);
   useEffect(() => console.error(error), [error]);
   return (
     <div className="not-found">
       <p className="eyebrow">COVER / read error</p>
       <h1>COVER could not load this page.</h1>
-      <p>{error.message}</p>
+      <p>{errorMessage}</p>
       <div className="inline-actions">
         <button
           className="button button-light"
