@@ -1,0 +1,1 @@
+{"case":"conflict","insured_agent":"agent:demo-v1","original_instruction":{"agent":"agent:demo-v1"},"records":[{"actor":"agent:demo-v1"}],"agent_action":"One record says the action was unauthorized and another says it was approved.","loss":"The causal record is materially inconsistent."}

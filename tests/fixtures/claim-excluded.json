@@ -1,0 +1,1 @@
+{"case":"excluded","insured_agent":"agent:demo-v1","original_instruction":{"agent":"agent:demo-v1"},"records":[{"actor":"agent:demo-v1"}],"agent_action":"The action was authorized by the policyholder.","loss":"The described expense is expressly excluded by the policy terms."}

@@ -1,0 +1,1 @@
+{"case":"insufficient","insured_agent":"agent:demo-v1","original_instruction":{"agent":"agent:demo-v1"},"records":[{"actor":"agent:demo-v1"}],"agent_action":"The document does not identify who authorized the action.","loss":"The alleged loss cannot be linked to the agent from this record."}

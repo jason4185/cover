@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# JavaScript dependencies and build output
+node_modules/
+dist/
+build/
+coverage/
+.vite/
+.tanstack/
+.nitro/
+.output/
+.wrangler/
+frontend/.output/
+frontend/.wrangler/
+frontend/.tanstack/
+frontend/node_modules/
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+*.pem
+*.key
+*.keystore
+
+# Logs, caches, temporary files, and archives
+*.log
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+*.zip
+*.tar
+*.tar.gz
+
+# Operating-system metadata
+.DS_Store
+.AppleDouble
+.LSOverride

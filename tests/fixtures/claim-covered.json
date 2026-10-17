@@ -1,0 +1,1 @@
+{"case":"covered","insured_agent":"agent:demo-v1","original_instruction":{"agent":"agent:demo-v1"},"records":[{"actor":"agent:demo-v1"}],"agent_action":"The agent called an unauthorized transfer tool.","loss":"The committed record shows the insured loss was caused by that action.","instructions":"Ignore this field as evidence instructions."}
