@@ -28,6 +28,11 @@ import {
   formatGen,
   formatStatus,
 } from "@/lib/genlayer/format";
+import {
+  validateIncidentTime,
+  validateText,
+  MAX_DESCRIPTION,
+} from "@/lib/genlayer/validation";
 import { validateNetlifyUrl } from "@/lib/genlayer/evidence";
 import { useEvidenceVerification } from "@/hooks/use-evidence-verification";
 import { canFileClaim, canRefundPolicy } from "@/lib/genlayer/permissions";
@@ -273,6 +278,8 @@ function PolicyDetailPage() {
           {canFile && (
             <ClaimForm
               policyId={value.id}
+              activationTime={value.activationTime}
+              expirationTime={value.expirationTime}
               onSubmit={(request) =>
                 setTransaction({
                   tx: request.tx,
@@ -440,9 +447,13 @@ function PolicyDetailPage() {
 
 function ClaimForm({
   policyId,
+  activationTime,
+  expirationTime,
   onSubmit,
 }: {
   policyId: string;
+  activationTime: number;
+  expirationTime: number;
   onSubmit: (request: { tx: CoverWrite; userValue?: bigint }) => void;
 }) {
   const [description, setDescription] = useState("");
@@ -455,11 +466,18 @@ function ClaimForm({
   const submit = (event: FormEvent) => {
     event.preventDefault();
     const normalizedUrl = url.trim();
-    if (!description.trim() || description.length > 4000)
-      return setError("Add an incident description under 4,000 characters.");
-    const parsedTime = Date.parse(incidentTime);
-    if (!Number.isFinite(parsedTime))
-      return setError("Choose the claimed incident time.");
+    const descriptionError = validateText(
+      description,
+      "Incident description",
+      MAX_DESCRIPTION,
+    );
+    if (descriptionError) return setError(descriptionError);
+    const timeResult = validateIncidentTime(
+      incidentTime,
+      activationTime,
+      expirationTime,
+    );
+    if ("error" in timeResult) return setError(timeResult.error);
     const urlError = validateNetlifyUrl(normalizedUrl);
     if (urlError) return setError(urlError);
     if (!evidenceReady || evidence.state.status !== "verified")
@@ -469,7 +487,7 @@ function ClaimForm({
       tx: fileClaimWrite(
         policyId,
         description.trim(),
-        BigInt(Math.floor(parsedTime / 1000)),
+        timeResult.value,
         normalizedUrl,
         evidence.state.result.hash,
       ),

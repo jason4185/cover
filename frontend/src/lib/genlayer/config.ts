@@ -19,7 +19,7 @@ export const STUDIO_NEXT_RPC_URL =
 export const STUDIO_NEXT_EXPLORER_URL =
   "https://explorer-studio-dev.genlayer.com";
 export const OFFICIAL_COVER_CONTRACT_ADDRESS =
-  "0x12EbF0972C27266231e7f0b1c8cc6A20efCC44Fa" as Address;
+  "0x0982ebee0aA80Ed50c51903186ae5765e06879d8" as Address;
 
 const configuredAddress = import.meta.env["VITE_COVER_CONTRACT_ADDRESS"] as
   string | undefined;
@@ -38,7 +38,7 @@ export const COVER_CONFIGURED =
 export const GENLAYER_CONFIG_ERROR = !COVER_CONTRACT_ADDRESS
   ? !configuredAddress
     ? "COVER is not configured yet. Set VITE_COVER_CONTRACT_ADDRESS before using on-chain data."
-    : "COVER is configured for an unsupported deployment. Use the official V2 contract address."
+    : "COVER is configured for an unsupported deployment. Use the official V3 contract address."
   : parsedChainId !== STUDIO_NEXT_CHAIN_ID
     ? `COVER requires Studio Next chain ${STUDIO_NEXT_CHAIN_ID}; received ${parsedChainId}.`
     : undefined;

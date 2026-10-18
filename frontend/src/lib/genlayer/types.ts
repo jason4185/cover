@@ -21,6 +21,8 @@ export type CoverConfig = {
   policyStates: string[];
   claimStates: string[];
   evidenceHost: string;
+  supportsReconsideration: boolean;
+  reviewAttemptLimit: number;
 };
 
 export type CoverPolicy = {
@@ -63,6 +65,18 @@ export type CoverClaim = {
   status: ClaimStatus;
   settlementAttempts: number;
   lastSettlementAt: number;
+  initialVerdict: Verdict | "";
+  initialReasonCode: string;
+  reviewAttempts: number;
+  reviewEvidenceUrl: string;
+  reviewEvidenceSha256: string;
+  reviewEvidenceSubmitted: boolean;
+  reviewResponse: string;
+  reviewResponseUrl: string;
+  reviewResponseSha256: string;
+  reviewResponseSubmitted: boolean;
+  reviewResponseWaived: boolean;
+  reviewResponseFinalized: boolean;
 };
 
 export type CoverOverview = {

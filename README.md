@@ -104,7 +104,12 @@ Writes:
 - `finalize_insurer_response(claim_id)` — explicit insurer finalization.
 - `waive_insurer_response(claim_id)` — explicit insurer waiver.
 - `adjudicate_claim(claim_id)` — participant-triggered judgment after response completion or deadline.
-- `close_insufficient_claim(claim_id)` — participant-triggered closure after the review window.
+- `submit_review_evidence(claim_id, evidence_url, evidence_sha256)` — one policyholder-only review evidence commitment with a distinct hash.
+- `submit_review_response(claim_id, response, counterevidence_url, counterevidence_sha256)` — one insurer review response and counterevidence commitment.
+- `finalize_review_response(claim_id)` — explicit insurer finalization of the review response.
+- `waive_review_response(claim_id)` — insurer waiver of the review response opportunity.
+- `reconsider_claim(claim_id)` — one participant-triggered independent reconsideration during the bounded review period.
+- `close_insufficient_claim(claim_id)` — participant-triggered closure after the review window and, when applicable, the fixed 24-hour grace period.
 - `settle_claim(claim_id)` — fixed-amount settlement for a covered claim.
 - `refund_policy(policy_id)` — insurer-only refund of an eligible unused reserve.
 
@@ -120,13 +125,13 @@ The frontend reads onchain policy and claim data from the deployed contract. It 
 
 ## Deployment and Local Development
 
-The current COVER V2 deployment is on GenLayer Studio Next:
+The current COVER V3 deployment is on GenLayer Studio Next:
 
 ```text
 Network:  GenLayer Studio Next
 Chain ID: 61997
 RPC:      https://studio-next.genlayer.com/api
-Contract: 0x12EbF0972C27266231e7f0b1c8cc6A20efCC44Fa
+Contract: 0x0982ebee0aA80Ed50c51903186ae5765e06879d8
 ```
 
 The frontend is intended for hosting on Vercel. This repository does not claim a deployed Vercel URL and does not include a Vercel deployment configuration. The verified application build is `bun run build` from `frontend/`; configure the hosting project from the existing frontend package and verify its framework settings before deployment.
@@ -136,7 +141,7 @@ Use the safe example environment file:
 ```text
 VITE_GENLAYER_RPC_URL=https://studio-next.genlayer.com/api
 VITE_GENLAYER_CHAIN_ID=61997
-VITE_COVER_CONTRACT_ADDRESS=0x12EbF0972C27266231e7f0b1c8cc6A20efCC44Fa
+VITE_COVER_CONTRACT_ADDRESS=0x0982ebee0aA80Ed50c51903186ae5765e06879d8
 ```
 
 Do not commit `frontend/.env` or wallet credentials. From the repository root:
@@ -169,7 +174,7 @@ bun run build
 
 The local fixtures cover covered, excluded, insufficient, conflicting, malformed, altered, and prompt-injection cases. Direct tests use host-simulated web and model responses; they do not prove genuine validator agreement or final GEN transfer behavior.
 
-The verified COVER V2 successful-claim test followed this path:
+The verified COVER successful-claim test followed this path:
 
 - a policy was funded with 1 GEN;
 - the submitted evidence identified the matching insured agent;

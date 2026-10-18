@@ -1801,10 +1801,123 @@ code {
   padding-top: 15px;
   border-top: 1px solid var(--line-soft);
 }
+.transaction-status-tray {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 90;
+  width: min(390px, calc(100vw - 32px));
+  max-height: min(520px, calc(100dvh - 40px));
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  background: rgba(17, 18, 18, 0.97);
+  box-shadow: 0 22px 70px rgba(0, 0, 0, 0.5);
+}
+.transaction-status-tray-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.transaction-status-tray-head > div {
+  display: grid;
+  gap: 4px;
+}
+.transaction-status-tray-head strong {
+  color: var(--paper);
+  font-size: 12px;
+  font-weight: 500;
+}
+.transaction-status-list {
+  display: grid;
+}
+.transaction-status-item {
+  display: grid;
+  gap: 7px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.transaction-status-item:last-child {
+  border-bottom: 0;
+}
+.transaction-status-item-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.transaction-status-item strong,
+.transaction-status-item > span {
+  color: var(--paper);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.transaction-status-item > span {
+  color: var(--muted);
+}
+.transaction-status-item code {
+  overflow: hidden;
+  color: var(--signal);
+  font-family: var(--mono);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.transaction-status-id summary {
+  color: var(--faint);
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 9px;
+}
+.transaction-status-id code {
+  display: block;
+  margin-top: 5px;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.transaction-status-item p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.transaction-status-dismiss,
+.transaction-status-refresh {
+  border: 0;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+}
+.transaction-status-dismiss {
+  padding: 0 2px;
+  font-size: 18px;
+  line-height: 1;
+}
+.transaction-status-dismiss:hover,
+.transaction-status-refresh:hover {
+  color: var(--paper);
+}
+.transaction-status-refresh {
+  justify-self: start;
+  padding: 2px 0;
+  color: var(--signal);
+  font-family: var(--mono);
+  font-size: 10px;
+}
 .transaction-receipt code {
   overflow-wrap: anywhere;
   color: var(--signal);
   font-size: 10px;
+}
+.transaction-finality {
+  display: grid;
+  gap: 5px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line-soft);
 }
 
 .site-footer {
@@ -2059,5 +2172,11 @@ code {
   }
   .transaction-accepted {
     display: grid;
+  }
+  .transaction-status-tray {
+    right: 12px;
+    bottom: max(12px, env(safe-area-inset-bottom));
+    width: calc(100vw - 24px);
+    max-height: min(420px, calc(100dvh - 24px));
   }
 }

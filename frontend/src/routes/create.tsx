@@ -14,12 +14,14 @@ import { useCoverRefresh } from "@/hooks/use-cover-data";
 import { readPolicies } from "@/lib/genlayer/reads";
 import { readUntilAcceptedState } from "@/lib/genlayer/accepted";
 import { COVER_CONFIGURED } from "@/lib/genlayer/config";
+import { formatGen, sameAddress } from "@/lib/genlayer/format";
 import {
-  isHexAddress,
-  formatGen,
-  parseGenAmount,
-  sameAddress,
-} from "@/lib/genlayer/format";
+  validateAgentId,
+  validateCompensation,
+  validateDurationDays,
+  validatePolicyTerms,
+  validatePolicyholderAddress,
+} from "@/lib/genlayer/validation";
 import { createPolicyWrite } from "@/lib/genlayer/writes";
 import { useWallet } from "@/lib/genlayer/wallet";
 import type { CoverWrite } from "@/lib/genlayer/types";
@@ -71,35 +73,25 @@ function CreatePolicyPage() {
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setError(undefined);
-    if (!isHexAddress(form.policyholder))
-      return setError("Enter a valid 20-byte policyholder address.");
+    const policyholderError = validatePolicyholderAddress(form.policyholder);
+    if (policyholderError) return setError(policyholderError);
     if (!wallet.address)
       return setError("Connect the insurer wallet before reviewing a policy.");
     if (sameAddress(wallet.address, form.policyholder))
       return setError(
         "The contract requires insurer and policyholder to be different wallets.",
       );
-    if (!form.agent.trim() || form.agent.length > 256)
-      return setError("Add an insured agent identifier under 256 characters.");
-    if (!form.conditions.trim() || form.conditions.length > 4000)
-      return setError("Add coverage conditions under 4,000 characters.");
-    if (form.exclusions.length > 4000)
-      return setError("Keep exclusions under 4,000 characters.");
-    let compensation: bigint;
-    try {
-      compensation = parseGenAmount(form.compensation);
-    } catch (cause) {
-      return setError(
-        cause instanceof Error ? cause.message : "Enter a valid GEN amount.",
-      );
-    }
-    if (compensation <= 0n)
-      return setError("Compensation must be greater than zero.");
-    const days = Number(form.duration);
-    if (!Number.isInteger(days) || days < 1 || days > 366)
-      return setError(
-        "Coverage duration must be a whole number from 1 to 366 days.",
-      );
+    const agentError = validateAgentId(form.agent);
+    if (agentError) return setError(agentError);
+    const termsError = validatePolicyTerms(form.conditions, form.exclusions);
+    if (termsError) return setError(termsError);
+    const compensationResult = validateCompensation(form.compensation);
+    if ("error" in compensationResult)
+      return setError(compensationResult.error);
+    const compensation = compensationResult.value;
+    const durationResult = validateDurationDays(form.duration);
+    if ("error" in durationResult) return setError(durationResult.error);
+    const { days } = durationResult;
     setPreparing(true);
     try {
       const request = createPolicyWrite(

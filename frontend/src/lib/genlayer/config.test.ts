@@ -12,7 +12,7 @@ describe("deployed COVER configuration", () => {
   it("uses the official Studio Next deployment", () => {
     expect(COVER_CONFIGURED).toBe(true);
     expect(COVER_CONTRACT_ADDRESS?.toLowerCase()).toBe(
-      "0x12ebf0972c27266231e7f0b1c8cc6a20efcc44fa",
+      "0x0982ebee0aa80ed50c51903186ae5765e06879d8",
     );
     expect(COVER_CONTRACT_ADDRESS).toBe(OFFICIAL_COVER_CONTRACT_ADDRESS);
     expect(COVER_QUERY_SCOPE).toEqual([
@@ -20,7 +20,7 @@ describe("deployed COVER configuration", () => {
       "deployment",
       61997,
       "https://studio-next.genlayer.com/api",
-      "0x12ebf0972c27266231e7f0b1c8cc6a20efcc44fa",
+      "0x0982ebee0aa80ed50c51903186ae5765e06879d8",
     ]);
     expect(STUDIO_NEXT_CHAIN_ID).toBe(61997);
     expect(STUDIO_NEXT_RPC_URL).toBe("https://studio-next.genlayer.com/api");

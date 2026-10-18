@@ -12,6 +12,7 @@ import { useEffect, type ReactNode } from "react";
 import "@genlayer/transaction-kit-react/styles.css";
 import "../styles.css";
 import { SiteFooter, SiteHeader } from "@/components/cover/Shell";
+import { TransactionStatusProvider } from "@/lib/genlayer/transaction-status";
 import { WalletProvider } from "@/lib/genlayer/wallet";
 
 function NotFound() {
@@ -115,9 +116,11 @@ function RootComponent() {
   return (
     <QueryClientProvider client={queryClient}>
       <WalletProvider>
-        <SiteHeader />
-        <Outlet />
-        <SiteFooter />
+        <TransactionStatusProvider>
+          <SiteHeader />
+          <Outlet />
+          <SiteFooter />
+        </TransactionStatusProvider>
       </WalletProvider>
     </QueryClientProvider>
   );

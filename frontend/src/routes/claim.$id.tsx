@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState, type FormEvent, type ReactNode } from "react";
-import { CheckCircle2, Gavel, Send, TimerReset } from "lucide-react";
+import { CheckCircle2, FileUp, Gavel, Send, TimerReset } from "lucide-react";
 import { PageContainer, PageIntro } from "@/components/cover/Shell";
 import {
   EvidenceTroubleshooting,
@@ -18,7 +18,12 @@ import {
   Timeline,
   UnconfiguredState,
 } from "@/components/cover/UI";
-import { useClaim, useCoverRefresh, usePolicy } from "@/hooks/use-cover-data";
+import {
+  useClaim,
+  useCoverConfig,
+  useCoverRefresh,
+  usePolicy,
+} from "@/hooks/use-cover-data";
 import { readClaim } from "@/lib/genlayer/reads";
 import { readUntilAcceptedState } from "@/lib/genlayer/accepted";
 import { COVER_CONFIGURED } from "@/lib/genlayer/config";
@@ -29,23 +34,34 @@ import {
   formatStatus,
   nowSeconds,
 } from "@/lib/genlayer/format";
+import { MAX_RESPONSE, validateText } from "@/lib/genlayer/validation";
 import { validateNetlifyUrl } from "@/lib/genlayer/evidence";
 import { useEvidenceVerification } from "@/hooks/use-evidence-verification";
 import {
   canAdjudicateClaim,
   canCloseInsufficientClaim,
   canFinalizeInsurerResponse,
+  canFinalizeReviewResponse,
+  canReconsiderClaim,
   canSettleClaim,
+  canSubmitReviewEvidence,
+  canSubmitReviewResponse,
   canSubmitInsurerResponse,
+  canWaiveReviewResponse,
   canWaiveInsurerResponse,
 } from "@/lib/genlayer/permissions";
 import { useWallet } from "@/lib/genlayer/wallet";
 import {
   adjudicateClaimWrite,
   closeInsufficientClaimWrite,
+  finalizeReviewResponseWrite,
   finalizeInsurerResponseWrite,
+  reconsiderClaimWrite,
   settleClaimWrite,
+  submitReviewEvidenceWrite,
+  submitReviewResponseWrite,
   submitInsurerResponseWrite,
+  waiveReviewResponseWrite,
   waiveInsurerResponseWrite,
 } from "@/lib/genlayer/writes";
 import type { CoverWrite } from "@/lib/genlayer/types";
@@ -65,11 +81,13 @@ function ClaimDetailPage() {
   const query = useClaim(id);
   const claim = query.data;
   const policy = usePolicy(claim?.policyId ?? "0");
+  const config = useCoverConfig();
   const wallet = useWallet();
   const refresh = useCoverRefresh();
   const [transaction, setTransaction] = useState<TransactionState>();
   const [success, setSuccess] = useState<string>();
   const now = nowSeconds();
+  const supportsReconsideration = config.data?.supportsReconsideration === true;
 
   if (!COVER_CONFIGURED)
     return (
@@ -144,6 +162,21 @@ function ClaimDetailPage() {
     wallet.address,
     now,
   );
+  const canReviewEvidence =
+    supportsReconsideration &&
+    canSubmitReviewEvidence(claim, relatedPolicy, wallet.address, now);
+  const canReviewResponse =
+    supportsReconsideration &&
+    canSubmitReviewResponse(claim, relatedPolicy, wallet.address, now);
+  const canFinalizeReview =
+    supportsReconsideration &&
+    canFinalizeReviewResponse(claim, relatedPolicy, wallet.address, now);
+  const canWaiveReview =
+    supportsReconsideration &&
+    canWaiveReviewResponse(claim, relatedPolicy, wallet.address, now);
+  const canReconsider =
+    supportsReconsideration &&
+    canReconsiderClaim(claim, relatedPolicy, wallet.address, now);
   const canSettle = canSettleClaim(claim, wallet.address);
   const afterSuccess = async (message: string) => {
     setTransaction(undefined);
@@ -191,6 +224,27 @@ function ClaimDetailPage() {
         }
         if (method === "close_insufficient_claim") {
           return currentClaim.status === "CLOSED";
+        }
+        if (method === "submit_review_evidence") {
+          return currentClaim.reviewEvidenceSubmitted;
+        }
+        if (method === "submit_review_response") {
+          return currentClaim.reviewResponseSubmitted;
+        }
+        if (method === "finalize_review_response") {
+          return currentClaim.reviewResponseFinalized;
+        }
+        if (method === "waive_review_response") {
+          return (
+            currentClaim.reviewResponseWaived &&
+            currentClaim.reviewResponseFinalized
+          );
+        }
+        if (method === "reconsider_claim") {
+          return (
+            currentClaim.reviewAttempts > claim.reviewAttempts &&
+            currentClaim.verdict !== ""
+          );
         }
         if (method === "settle_claim") {
           return currentClaim.status === "PAID";
@@ -310,6 +364,155 @@ function ClaimDetailPage() {
               <p>{claim.description}</p>
             </div>
           </Panel>
+          {claim.status === "REVIEW_OPEN" && supportsReconsideration && (
+            <Panel>
+              <div className="panel-head">
+                <div>
+                  <h2>Reconsideration</h2>
+                  <p>
+                    One review attempt is available before the review deadline
+                    and during the fixed 24-hour grace period when review
+                    evidence is pending. Original evidence and the first
+                    judgment remain unchanged.
+                  </p>
+                </div>
+                <FileUp size={19} color="var(--signal)" />
+              </div>
+              <div className="info-list">
+                <InfoRow
+                  label="Review deadline"
+                  value={formatDateTime(claim.reviewDeadline)}
+                />
+                <InfoRow
+                  label="Attempts"
+                  value={`${claim.reviewAttempts} of 1 used`}
+                />
+                <InfoRow
+                  label="First judgment"
+                  value={claim.initialVerdict || "Insufficient evidence"}
+                />
+                <InfoRow
+                  label="First reason"
+                  value={formatStatus(
+                    claim.initialReasonCode || "INSUFFICIENT_EVIDENCE",
+                  )}
+                />
+              </div>
+              {canReviewEvidence && (
+                <ReviewEvidenceForm
+                  claimId={claim.id}
+                  onSubmit={(tx) =>
+                    setTransaction({
+                      tx,
+                      title: "Submit review evidence",
+                      description:
+                        "This stores one additional Netlify evidence commitment without changing the original claim evidence. The hash covers the exact fetched response bytes.",
+                      review,
+                    })
+                  }
+                />
+              )}
+              {claim.reviewEvidenceSubmitted && (
+                <EvidenceLink
+                  label="Review evidence"
+                  url={claim.reviewEvidenceUrl}
+                  hash={claim.reviewEvidenceSha256}
+                />
+              )}
+              {canReviewResponse && (
+                <ReviewResponseForm
+                  claimId={claim.id}
+                  onSubmit={(tx) =>
+                    setTransaction({
+                      tx,
+                      title: "Submit review response",
+                      description:
+                        "This stores the Insurer's one review response and counterevidence without changing the original response.",
+                      review,
+                    })
+                  }
+                />
+              )}
+              {claim.reviewResponseSubmitted && (
+                <>
+                  <div className="copy-block">
+                    <h3>Review response</h3>
+                    <p>{claim.reviewResponse}</p>
+                  </div>
+                  {claim.reviewResponseUrl && (
+                    <EvidenceLink
+                      label="Review counterevidence"
+                      url={claim.reviewResponseUrl}
+                      hash={claim.reviewResponseSha256}
+                    />
+                  )}
+                </>
+              )}
+              {(canFinalizeReview || canWaiveReview) && (
+                <div className="inline-actions" style={{ marginTop: 18 }}>
+                  {canFinalizeReview && (
+                    <Button
+                      variant="light"
+                      onClick={() =>
+                        setTransaction({
+                          tx: finalizeReviewResponseWrite(claim.id),
+                          title: "Finalize review response",
+                          description:
+                            "The review response opportunity is complete. A participant may request the single reconsideration judgment.",
+                          review,
+                        })
+                      }
+                    >
+                      Finalize review response
+                    </Button>
+                  )}
+                  {canWaiveReview && (
+                    <Button
+                      variant="outline"
+                      onClick={() =>
+                        setTransaction({
+                          tx: waiveReviewResponseWrite(claim.id),
+                          title: "Waive review response",
+                          description:
+                            "Waiving ends the Insurer's review response opportunity without changing the first judgment.",
+                          review,
+                        })
+                      }
+                    >
+                      Waive review response
+                    </Button>
+                  )}
+                </div>
+              )}
+              {canReconsider && (
+                <Button
+                  variant="light"
+                  onClick={() =>
+                    setTransaction({
+                      tx: reconsiderClaimWrite(claim.id),
+                      title: "Request reconsideration",
+                      description:
+                        "GenLayer will independently fetch the replacement evidence, reapply the insured-agent identity gate, and evaluate the claim once more.",
+                      review,
+                    })
+                  }
+                >
+                  Request reconsideration
+                </Button>
+              )}
+            </Panel>
+          )}
+          {claim.status === "REVIEW_OPEN" && !supportsReconsideration && (
+            <Panel>
+              <div className="empty-state">
+                <p>
+                  This deployed contract does not advertise the bounded review
+                  process. The claim remains governed by its existing review
+                  deadline.
+                </p>
+              </div>
+            </Panel>
+          )}
           <Panel>
             <div className="panel-head">
               <div>
@@ -494,11 +697,18 @@ function ClaimDetailPage() {
                 </p>
               </>
             )}
-            {!canAdjudicate && !canClose && !canSettle && (
-              <span className="scan-note">
-                No action is currently available to this wallet.
-              </span>
-            )}
+            {!canAdjudicate &&
+              !canClose &&
+              !canSettle &&
+              !canReviewEvidence &&
+              !canReviewResponse &&
+              !canFinalizeReview &&
+              !canWaiveReview &&
+              !canReconsider && (
+                <span className="scan-note">
+                  No action is currently available to this wallet.
+                </span>
+              )}
           </Panel>
           <Panel>
             <div className="panel-head">
@@ -625,8 +835,12 @@ function ResponseForm({
   const submit = (event: FormEvent) => {
     event.preventDefault();
     const normalizedUrl = url.trim();
-    if (!response.trim() || response.length > 4000)
-      return setError("Add a response under 4,000 characters.");
+    const responseError = validateText(
+      response,
+      "Insurer response",
+      MAX_RESPONSE,
+    );
+    if (responseError) return setError(responseError);
     const urlError = validateNetlifyUrl(normalizedUrl);
     if (urlError) return setError(urlError);
     if (!evidenceReady || evidence.state.status !== "verified")
@@ -691,5 +905,144 @@ function ResponseForm({
         </div>
       </form>
     </Panel>
+  );
+}
+
+function ReviewEvidenceForm({
+  claimId,
+  onSubmit,
+}: {
+  claimId: string;
+  onSubmit: (tx: CoverWrite) => void;
+}) {
+  const [url, setUrl] = useState("");
+  const [error, setError] = useState<string>();
+  const evidence = useEvidenceVerification(url);
+  const evidenceReady =
+    evidence.state.status === "verified" && evidence.state.url === url.trim();
+
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    const normalizedUrl = url.trim();
+    const urlError = validateNetlifyUrl(normalizedUrl);
+    if (urlError) return setError(urlError);
+    if (!evidenceReady || evidence.state.status !== "verified")
+      return setError("Wait for COVER to verify the current evidence URL.");
+    setError(undefined);
+    onSubmit(
+      submitReviewEvidenceWrite(
+        claimId,
+        normalizedUrl,
+        evidence.state.result.hash,
+      ),
+    );
+  };
+
+  return (
+    <form className="form-grid" style={{ marginTop: 22 }} onSubmit={submit}>
+      <div className="form-field full">
+        <label htmlFor="review-evidence-url">Replacement evidence URL</label>
+        <input
+          id="review-evidence-url"
+          value={url}
+          onChange={(event) => setUrl(event.target.value)}
+          placeholder="https://site.netlify.app/review.json"
+        />
+        <small>
+          The current Netlify JSON is fetched and hashed automatically. It does
+          not authenticate the underlying incident.
+        </small>
+      </div>
+      <div className="form-field full">
+        <EvidenceVerificationStatus
+          verification={evidence.state}
+          onRetry={evidence.retry}
+        />
+        <EvidenceTroubleshooting />
+      </div>
+      {error && <p className="field-error full">{error}</p>}
+      <div className="form-actions full">
+        <Button type="submit" variant="light" disabled={!evidenceReady}>
+          Review replacement evidence
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+function ReviewResponseForm({
+  claimId,
+  onSubmit,
+}: {
+  claimId: string;
+  onSubmit: (tx: CoverWrite) => void;
+}) {
+  const [response, setResponse] = useState("");
+  const [url, setUrl] = useState("");
+  const [error, setError] = useState<string>();
+  const evidence = useEvidenceVerification(url);
+  const evidenceReady =
+    evidence.state.status === "verified" && evidence.state.url === url.trim();
+
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    const responseError = validateText(
+      response,
+      "Review insurer response",
+      MAX_RESPONSE,
+    );
+    if (responseError) return setError(responseError);
+    const normalizedUrl = url.trim();
+    const urlError = validateNetlifyUrl(normalizedUrl);
+    if (urlError) return setError(urlError);
+    if (!evidenceReady || evidence.state.status !== "verified")
+      return setError("Wait for COVER to verify the current evidence URL.");
+    setError(undefined);
+    onSubmit(
+      submitReviewResponseWrite(
+        claimId,
+        response.trim(),
+        normalizedUrl,
+        evidence.state.result.hash,
+      ),
+    );
+  };
+
+  return (
+    <form className="form-grid" style={{ marginTop: 22 }} onSubmit={submit}>
+      <div className="form-field full">
+        <label htmlFor="review-insurer-response">Review response</label>
+        <textarea
+          id="review-insurer-response"
+          value={response}
+          onChange={(event) => setResponse(event.target.value)}
+          placeholder="Add material counterevidence or explain why the corrected record does not establish coverage."
+        />
+      </div>
+      <div className="form-field full">
+        <label htmlFor="review-counterevidence-url">
+          Review counterevidence URL
+        </label>
+        <input
+          id="review-counterevidence-url"
+          value={url}
+          onChange={(event) => setUrl(event.target.value)}
+          placeholder="https://site.netlify.app/review-response.json"
+        />
+      </div>
+      <div className="form-field full">
+        <EvidenceVerificationStatus
+          verification={evidence.state}
+          onRetry={evidence.retry}
+        />
+        <EvidenceTroubleshooting />
+      </div>
+      {error && <p className="field-error full">{error}</p>}
+      <div className="form-actions full">
+        <Button type="submit" variant="light" disabled={!evidenceReady}>
+          Review insurer response
+        </Button>
+      </div>
+    </form>
   );
 }

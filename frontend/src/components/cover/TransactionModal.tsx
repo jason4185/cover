@@ -10,6 +10,7 @@ import { useWallet } from "@/lib/genlayer/wallet";
 import { userFacingError } from "@/lib/genlayer/errors";
 import { isAcceptedTransaction } from "@/lib/genlayer/accepted";
 import { formatAddress, formatGen } from "@/lib/genlayer/format";
+import { useTransactionStatus } from "@/lib/genlayer/transaction-status";
 import { Button } from "./UI";
 
 export type AcceptedSyncResult = {
@@ -47,7 +48,6 @@ export function TransactionModal({
   review,
   onAccepted,
   onSuccess,
-  onFinalized,
   onClose,
 }: {
   open: boolean;
@@ -58,10 +58,10 @@ export function TransactionModal({
   review?: ReactNode;
   onAccepted?: (status: TrackedStatus) => Promise<AcceptedSyncResult>;
   onSuccess?: (status: TrackedStatus, result: AcceptedSyncResult) => void;
-  onFinalized?: (status: TrackedStatus) => void;
   onClose: () => void;
 }) {
   const wallet = useWallet();
+  const { monitors, trackAccepted } = useTransactionStatus();
   const modalRef = useRef<HTMLElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const canCloseRef = useRef(true);
@@ -69,21 +69,16 @@ export function TransactionModal({
   const [error, setError] = useState<string>();
   const [syncing, setSyncing] = useState(false);
   const [acceptedResult, setAcceptedResult] = useState<AcceptedSyncResult>();
-  const [finalization, setFinalization] = useState<TrackedStatus>();
-  const mountedRef = useRef(false);
 
   useEffect(() => {
     if (!open) {
-      mountedRef.current = false;
       setStatus(undefined);
       setError(undefined);
       setSyncing(false);
       setAcceptedResult(undefined);
-      setFinalization(undefined);
       return;
     }
 
-    mountedRef.current = true;
     const previousOverflow = document.body.style.overflow;
     const previousActiveElement = document.activeElement;
     document.body.style.overflow = "hidden";
@@ -140,21 +135,14 @@ export function TransactionModal({
     if (canClose) onClose();
   };
 
+  const monitor = status?.genlayerTxId
+    ? monitors.find((item) => item.parentId === status.genlayerTxId)
+    : undefined;
+
   const handleDone = async (nextStatus: TrackedStatus) => {
     setStatus(nextStatus);
     if (isAcceptedTransaction(nextStatus)) {
-      if (nextStatus.genlayerTxId && wallet.kit) {
-        void wallet.kit
-          .track(nextStatus.genlayerTxId, () => undefined, {
-            until: "finalized",
-          })
-          .then((finalStatus) => {
-            if (finalStatus.phase !== "finalized") return;
-            if (mountedRef.current) setFinalization(finalStatus);
-            onFinalized?.(finalStatus);
-          })
-          .catch(() => undefined);
-      }
+      trackAccepted(nextStatus, tx.kind === "write" ? tx.method : "deploy");
       setSyncing(true);
       try {
         const result =
@@ -348,6 +336,12 @@ export function TransactionModal({
             <div className="transaction-receipt">
               <span className="eyebrow">Transaction id</span>
               <code>{status.genlayerTxId}</code>
+              {status.evmTxHash && (
+                <>
+                  <span className="eyebrow">Submission hash</span>
+                  <code>{status.evmTxHash}</code>
+                </>
+              )}
               {status.phase === "decided" &&
                 status.statusName === "ACCEPTED" && (
                   <p className="tiny-note">
@@ -356,11 +350,49 @@ export function TransactionModal({
                     transfer was received.
                   </p>
                 )}
-              {finalization?.phase === "finalized" && (
-                <p className="tiny-note">
-                  Finalized status observed separately. This still does not
-                  independently confirm an external GEN transfer.
-                </p>
+              {monitor && (
+                <div className="transaction-finality" role="status">
+                  <p className="tiny-note">
+                    {monitor.finalization === "pending"
+                      ? "Finalization pending. You may continue using the application; this tracker remains active after the modal closes."
+                      : monitor.finalization === "finalized"
+                        ? "Parent transaction finalized. Finalization alone is not proof that an external GEN transfer was received."
+                        : monitor.finalization === "failed"
+                          ? "Parent transaction finalization failed. Do not retry until the contract state and transaction result are reviewed."
+                          : "Parent finalization is unresolved. The accepted contract state remains separate from delivery confirmation."}
+                  </p>
+                  {monitor.finalizationMessage && (
+                    <p
+                      className="tiny-note"
+                      style={{ color: "var(--warning)" }}
+                    >
+                      {monitor.finalizationMessage}
+                    </p>
+                  )}
+                  {monitor.transfer.status === "confirmed" && (
+                    <p
+                      className="tiny-note"
+                      style={{ color: "var(--positive)" }}
+                    >
+                      Child transfer execution finalized for{" "}
+                      {monitor.transfer.childIds.length} child transaction
+                      {monitor.transfer.childIds.length === 1 ? "" : "s"};
+                      recipient delivery remains unverified.
+                    </p>
+                  )}
+                  {(monitor.transfer.status === "unavailable" ||
+                    monitor.transfer.status === "unconfirmed") && (
+                    <p
+                      className="tiny-note"
+                      style={{ color: "var(--warning)" }}
+                    >
+                      {monitor.transfer.message}
+                      {monitor.transfer.childIds?.length
+                        ? ` Child transaction${monitor.transfer.childIds.length === 1 ? "" : "s"}: ${monitor.transfer.childIds.join(", ")}`
+                        : ""}
+                    </p>
+                  )}
+                </div>
               )}
               {canClose && (
                 <Button variant="quiet" onClick={close}>

@@ -61,6 +61,34 @@ export const finalizeInsurerResponseWrite = (claimId: string) =>
 
 export const waiveInsurerResponseWrite = (claimId: string) =>
   write("waive_insurer_response", [BigInt(claimId)]);
+export const submitReviewEvidenceWrite = (
+  claimId: string,
+  evidenceUrl: string,
+  evidenceSha256: string,
+) =>
+  write("submit_review_evidence", [
+    BigInt(claimId),
+    evidenceUrl,
+    evidenceSha256,
+  ]);
+export const submitReviewResponseWrite = (
+  claimId: string,
+  response: string,
+  counterevidenceUrl: string,
+  counterevidenceSha256: string,
+) =>
+  write("submit_review_response", [
+    BigInt(claimId),
+    response,
+    counterevidenceUrl,
+    counterevidenceSha256,
+  ]);
+export const finalizeReviewResponseWrite = (claimId: string) =>
+  write("finalize_review_response", [BigInt(claimId)]);
+export const waiveReviewResponseWrite = (claimId: string) =>
+  write("waive_review_response", [BigInt(claimId)]);
+export const reconsiderClaimWrite = (claimId: string) =>
+  write("reconsider_claim", [BigInt(claimId)]);
 
 export const adjudicateClaimWrite = (claimId: string) =>
   write("adjudicate_claim", [BigInt(claimId)]);

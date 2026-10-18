@@ -20,6 +20,7 @@ MAX_PROMPT_BYTES = 48_000
 MAX_MODEL_OUTPUT_BYTES = 256
 RESPONSE_WINDOW = 3 * 24 * 60 * 60
 REVIEW_WINDOW = 3 * 24 * 60 * 60
+RECONSIDERATION_GRACE_WINDOW = 24 * 60 * 60
 MAX_POLICY_DURATION = 366 * 24 * 60 * 60
 U256_MAX = 2**256 - 1
 
@@ -476,6 +477,20 @@ class Cover(gl.contract.Contract):
     claim_status: gl.storage.TreeMap[u256, str]
     claim_settlement_attempts: gl.storage.TreeMap[u256, u256]
     claim_last_settlement_at: gl.storage.TreeMap[u256, u256]
+    # Review evidence is append-only history: it never overwrites the original
+    # claim evidence or first judgment. One review attempt is permitted.
+    claim_initial_verdict: gl.storage.TreeMap[u256, str]
+    claim_initial_reason: gl.storage.TreeMap[u256, str]
+    claim_review_attempts: gl.storage.TreeMap[u256, u256]
+    claim_review_evidence_url: gl.storage.TreeMap[u256, str]
+    claim_review_evidence_sha256: gl.storage.TreeMap[u256, str]
+    claim_review_evidence_submitted: gl.storage.TreeMap[u256, bool]
+    claim_review_response: gl.storage.TreeMap[u256, str]
+    claim_review_response_url: gl.storage.TreeMap[u256, str]
+    claim_review_response_sha256: gl.storage.TreeMap[u256, str]
+    claim_review_response_submitted: gl.storage.TreeMap[u256, bool]
+    claim_review_response_waived: gl.storage.TreeMap[u256, bool]
+    claim_review_response_finalized: gl.storage.TreeMap[u256, bool]
 
     def __init__(self):
         self.policy_count = u256(0)
@@ -533,24 +548,73 @@ class Cover(gl.contract.Contract):
             "status": self.claim_status[claim_id],
             "settlement_attempts": self.claim_settlement_attempts.get(claim_id, u256(0)),
             "last_settlement_at": self.claim_last_settlement_at.get(claim_id, u256(0)),
+            "initial_verdict": self.claim_initial_verdict.get(claim_id, ""),
+            "initial_reason_code": self.claim_initial_reason.get(claim_id, ""),
+            "review_attempts": self.claim_review_attempts.get(claim_id, u256(0)),
+            "review_evidence_url": self.claim_review_evidence_url.get(claim_id, ""),
+            "review_evidence_sha256": self.claim_review_evidence_sha256.get(claim_id, ""),
+            "review_evidence_submitted": self.claim_review_evidence_submitted.get(claim_id, False),
+            "review_response": self.claim_review_response.get(claim_id, ""),
+            "review_response_url": self.claim_review_response_url.get(claim_id, ""),
+            "review_response_sha256": self.claim_review_response_sha256.get(claim_id, ""),
+            "review_response_submitted": self.claim_review_response_submitted.get(claim_id, False),
+            "review_response_waived": self.claim_review_response_waived.get(claim_id, False),
+            "review_response_finalized": self.claim_review_response_finalized.get(claim_id, False),
         }
 
     def _judgment_snapshot(self, claim_id: u256) -> tuple:
         policy_id = self.claim_policy[claim_id]
-        response_url = self.claim_response_url.get(claim_id, "")
-        response_hash = self.claim_response_sha256.get(claim_id, "")
+        if self.claim_review_evidence_submitted.get(claim_id, False):
+            claimant_url = self.claim_review_evidence_url[claim_id]
+            claimant_hash = self.claim_review_evidence_sha256[claim_id]
+        else:
+            claimant_url = self.claim_evidence_url[claim_id]
+            claimant_hash = self.claim_evidence_sha256[claim_id]
+        if self.claim_review_response_submitted.get(claim_id, False):
+            response = self.claim_review_response[claim_id]
+            response_url = self.claim_review_response_url[claim_id]
+            response_hash = self.claim_review_response_sha256[claim_id]
+        else:
+            response = self.claim_response.get(claim_id, "")
+            response_url = self.claim_response_url.get(claim_id, "")
+            response_hash = self.claim_response_sha256.get(claim_id, "")
         return (
             self.policy_conditions[policy_id],
             self.policy_exclusions[policy_id],
             self.policy_agent_id[policy_id],
             self.claim_incident_time[claim_id],
             self.claim_description[claim_id],
-            self.claim_response.get(claim_id, ""),
+            response,
             (
-                ("CLAIMANT", self.claim_evidence_url[claim_id], self.claim_evidence_sha256[claim_id]),
+                ("CLAIMANT", claimant_url, claimant_hash),
                 ("INSURER", response_url, response_hash),
             ),
         )
+
+    def _store_judgment(self, claim_id: u256, result: dict, now: u256, review: bool = False) -> str:
+        policy_id = self.claim_policy[claim_id]
+        outcome = result["outcome"]
+        self.claim_judged_at[claim_id] = now
+        self.claim_verdict[claim_id] = outcome
+        self.claim_reason[claim_id] = result["reason_code"]
+        if outcome == COVERED:
+            amount = self.policy_compensation[policy_id]
+            if self.policy_reserve.get(policy_id, 0) != amount or self.policy_liability.get(policy_id, 0) != 0:
+                _error("policy reserve is invalid")
+            self.policy_reserve[policy_id] = u256(0)
+            self.policy_liability[policy_id] = amount
+            self.policy_status[policy_id] = POLICY_RESOLVED
+            self.claim_status[claim_id] = CLAIM_SETTLEMENT_PENDING
+        elif outcome == NOT_COVERED:
+            self.policy_status[policy_id] = POLICY_RESOLVED
+            self.claim_status[claim_id] = CLAIM_JUDGED
+        else:
+            if not review and not self.claim_initial_verdict.get(claim_id, ""):
+                self.claim_initial_verdict[claim_id] = outcome
+                self.claim_initial_reason[claim_id] = result["reason_code"]
+            self.policy_status[policy_id] = POLICY_REVIEW
+            self.claim_status[claim_id] = CLAIM_REVIEW_OPEN
+        return outcome
 
     def _require_claim_participant(self, claim_id: u256) -> u256:
         policy_id = self.claim_policy[claim_id]
@@ -595,6 +659,8 @@ class Cover(gl.contract.Contract):
             "policy_states": [ACTIVE, POLICY_REVIEW, POLICY_RESOLVED, POLICY_REFUNDED],
             "claim_states": [CLAIM_RESPONSE_OPEN, CLAIM_READY, CLAIM_SETTLEMENT_PENDING, CLAIM_REVIEW_OPEN, CLAIM_JUDGED, CLAIM_PAID, CLAIM_CLOSED],
             "evidence_host": "*.netlify.app",
+            "supports_reconsideration": True,
+            "review_attempt_limit": 1,
         }
 
     @gl.public.view
@@ -708,6 +774,18 @@ class Cover(gl.contract.Contract):
         self.claim_status[claim_id] = CLAIM_RESPONSE_OPEN
         self.claim_settlement_attempts[claim_id] = u256(0)
         self.claim_last_settlement_at[claim_id] = u256(0)
+        self.claim_initial_verdict[claim_id] = ""
+        self.claim_initial_reason[claim_id] = ""
+        self.claim_review_attempts[claim_id] = u256(0)
+        self.claim_review_evidence_url[claim_id] = ""
+        self.claim_review_evidence_sha256[claim_id] = ""
+        self.claim_review_evidence_submitted[claim_id] = False
+        self.claim_review_response[claim_id] = ""
+        self.claim_review_response_url[claim_id] = ""
+        self.claim_review_response_sha256[claim_id] = ""
+        self.claim_review_response_submitted[claim_id] = False
+        self.claim_review_response_waived[claim_id] = False
+        self.claim_review_response_finalized[claim_id] = False
         self.policy_claim[policy_id] = claim_id
         return claim_id
 
@@ -772,25 +850,100 @@ class Cover(gl.contract.Contract):
             _error("claim is not ready for judgment")
         result = _run_judgment(self._judgment_snapshot(claim_id))
         outcome = result["outcome"]
-        self.claim_judged_at[claim_id] = now
-        self.claim_verdict[claim_id] = outcome
-        self.claim_reason[claim_id] = result["reason_code"]
-        if outcome == COVERED:
-            amount = self.policy_compensation[policy_id]
-            if self.policy_reserve.get(policy_id, 0) != amount or self.policy_liability.get(policy_id, 0) != 0:
-                _error("policy reserve is invalid")
-            self.policy_reserve[policy_id] = u256(0)
-            self.policy_liability[policy_id] = amount
-            self.policy_status[policy_id] = POLICY_RESOLVED
-            self.claim_status[claim_id] = CLAIM_SETTLEMENT_PENDING
-        elif outcome == NOT_COVERED:
-            self.policy_status[policy_id] = POLICY_RESOLVED
-            self.claim_status[claim_id] = CLAIM_JUDGED
-        else:
+        if outcome == INSUFFICIENT_EVIDENCE and not self.claim_initial_verdict.get(claim_id, ""):
             self.claim_review_deadline[claim_id] = _add(now, REVIEW_WINDOW)
-            self.policy_status[policy_id] = POLICY_REVIEW
-            self.claim_status[claim_id] = CLAIM_REVIEW_OPEN
-        return outcome
+        return self._store_judgment(claim_id, result, now)
+
+    @gl.public.write
+    def submit_review_evidence(self, claim_id: u256, evidence_url: str, evidence_sha256: str) -> None:
+        self._claim(claim_id)
+        policy_id = self.claim_policy[claim_id]
+        if gl.message.sender_address != self.policy_policyholder[policy_id]:
+            _error("only the policyholder may submit review evidence")
+        if self.claim_status[claim_id] != CLAIM_REVIEW_OPEN or self.claim_review_attempts.get(claim_id, 0) != 0:
+            _error("claim is not eligible for review evidence")
+        if self.claim_review_evidence_submitted.get(claim_id, False):
+            _error("review evidence was already submitted")
+        if _now() >= self.claim_review_deadline[claim_id]:
+            _error("review window is closed")
+        _require_netlify_url(evidence_url, "review evidence URL")
+        _require_hash(evidence_sha256, "review evidence SHA-256")
+        if evidence_sha256 == self.claim_evidence_sha256[claim_id]:
+            _error("review evidence must differ from original evidence")
+        self.claim_review_evidence_url[claim_id] = evidence_url
+        self.claim_review_evidence_sha256[claim_id] = evidence_sha256
+        self.claim_review_evidence_submitted[claim_id] = True
+
+    @gl.public.write
+    def submit_review_response(
+        self, claim_id: u256, response: str, counterevidence_url: str, counterevidence_sha256: str
+    ) -> None:
+        self._claim(claim_id)
+        policy_id = self.claim_policy[claim_id]
+        if gl.message.sender_address != self.policy_insurer[policy_id]:
+            _error("only the insurer may submit a review response")
+        if self.claim_status[claim_id] != CLAIM_REVIEW_OPEN or self.claim_review_attempts.get(claim_id, 0) != 0:
+            _error("claim is not eligible for a review response")
+        if self.claim_review_response_submitted.get(claim_id, False) or self.claim_review_response_waived.get(claim_id, False):
+            _error("review response opportunity is closed")
+        if _now() >= self.claim_review_deadline[claim_id]:
+            _error("review window is closed")
+        _text(response, "review insurer response", MAX_RESPONSE)
+        _require_netlify_url(counterevidence_url, "review counterevidence URL")
+        _require_hash(counterevidence_sha256, "review counterevidence SHA-256")
+        self.claim_review_response[claim_id] = response
+        self.claim_review_response_url[claim_id] = counterevidence_url
+        self.claim_review_response_sha256[claim_id] = counterevidence_sha256
+        self.claim_review_response_submitted[claim_id] = True
+
+    @gl.public.write
+    def finalize_review_response(self, claim_id: u256) -> None:
+        self._claim(claim_id)
+        policy_id = self.claim_policy[claim_id]
+        if gl.message.sender_address != self.policy_insurer[policy_id]:
+            _error("only the insurer may finalize a review response")
+        if self.claim_status[claim_id] != CLAIM_REVIEW_OPEN or self.claim_review_attempts.get(claim_id, 0) != 0 or not self.claim_review_response_submitted.get(claim_id, False):
+            _error("no open review response to finalize")
+        if _now() >= self.claim_review_deadline[claim_id]:
+            _error("review window is closed")
+        self.claim_review_response_finalized[claim_id] = True
+
+    @gl.public.write
+    def waive_review_response(self, claim_id: u256) -> None:
+        self._claim(claim_id)
+        policy_id = self.claim_policy[claim_id]
+        if gl.message.sender_address != self.policy_insurer[policy_id]:
+            _error("only the insurer may waive the review response")
+        if self.claim_status[claim_id] != CLAIM_REVIEW_OPEN or self.claim_review_attempts.get(claim_id, 0) != 0 or self.claim_review_response_submitted.get(claim_id, False):
+            _error("review response opportunity is closed")
+        if _now() >= self.claim_review_deadline[claim_id]:
+            _error("review window is closed")
+        self.claim_review_response_waived[claim_id] = True
+        self.claim_review_response_finalized[claim_id] = True
+
+    @gl.public.write
+    def reconsider_claim(self, claim_id: u256) -> str:
+        self._claim(claim_id)
+        self._require_claim_participant(claim_id)
+        if self.claim_status[claim_id] != CLAIM_REVIEW_OPEN or self.claim_review_attempts.get(claim_id, 0) != 0:
+            _error("claim is not eligible for reconsideration")
+        if not self.claim_review_evidence_submitted.get(claim_id, False):
+            _error("review evidence is required")
+        now = _now()
+        reconsideration_deadline = _add(
+            self.claim_review_deadline[claim_id], RECONSIDERATION_GRACE_WINDOW
+        )
+        if now >= reconsideration_deadline:
+            _error("reconsideration window is closed")
+        if (
+            not self.claim_review_response_finalized.get(claim_id, False)
+            and not self.claim_review_response_waived.get(claim_id, False)
+            and now < self.claim_review_deadline[claim_id]
+        ):
+            _error("review insurer response opportunity is still open")
+        result = _run_judgment(self._judgment_snapshot(claim_id))
+        self.claim_review_attempts[claim_id] = u256(1)
+        return self._store_judgment(claim_id, result, now, review=True)
 
     @gl.public.write
     def close_insufficient_claim(self, claim_id: u256) -> None:
@@ -799,11 +952,17 @@ class Cover(gl.contract.Contract):
         self._require_claim_participant(claim_id)
         if self.claim_status[claim_id] != CLAIM_REVIEW_OPEN:
             _error("claim is not in review")
-        if _now() < self.claim_review_deadline[claim_id]:
+        now = _now()
+        if now < self.claim_review_deadline[claim_id]:
             _error("review window is still open")
+        if (
+            self.claim_review_attempts.get(claim_id, 0) == 0
+            and self.claim_review_evidence_submitted.get(claim_id, False)
+            and now < _add(self.claim_review_deadline[claim_id], RECONSIDERATION_GRACE_WINDOW)
+        ):
+            _error("reconsideration grace period is still open")
         self.claim_status[claim_id] = CLAIM_CLOSED
         self.policy_status[policy_id] = POLICY_RESOLVED
-        self.claim_reason[claim_id] = REASON_INSUFFICIENT
 
     @gl.public.write
     def settle_claim(self, claim_id: u256) -> str:

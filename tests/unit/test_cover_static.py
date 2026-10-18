@@ -48,7 +48,8 @@ def test_storage_is_only_scalars_and_treemaps_and_write_surface_is_explicit():
     assert set(public_methods(tree)) == {
         "create_policy", "file_claim", "submit_insurer_response", "finalize_insurer_response",
         "waive_insurer_response", "adjudicate_claim", "close_insufficient_claim", "settle_claim",
-        "refund_policy",
+        "refund_policy", "submit_review_evidence", "submit_review_response",
+        "finalize_review_response", "waive_review_response", "reconsider_claim",
     }
 
 
@@ -63,6 +64,24 @@ def test_consensus_repeats_substantive_proposal_and_transfer_is_effects_first():
     assert settle.index("self.claim_status[claim_id] = CLAIM_PAID") < settle.index("_send_value(recipient, amount)")
     assert "emit_transfer(value=amount)" in source
     assert "only policy participants may request judgment" in source
+
+
+def test_reconsideration_has_distinct_evidence_and_non_overlapping_close_grace():
+    source = source_text()
+    assert "RECONSIDERATION_GRACE_WINDOW = 24 * 60 * 60" in source
+    review_start = source.index("    def submit_review_evidence")
+    review_end = source.index("    @gl.public.write", review_start + 1)
+    review_evidence = source[review_start:review_end]
+    assert "review evidence must differ from original evidence" in review_evidence
+    assert "evidence_sha256 == self.claim_evidence_sha256[claim_id]" in review_evidence
+
+    reconsider_start = source.index("    def reconsider_claim")
+    close_start = source.index("    def close_insufficient_claim")
+    reconsider = source[reconsider_start:close_start]
+    close = source[close_start:source.index("    @gl.public.write", close_start + 1)]
+    assert "now >= reconsideration_deadline" in reconsider
+    assert "reconsideration grace period is still open" in close
+    assert "claim_review_evidence_submitted" in close
 
 
 def test_local_netlify_fixtures_are_bounded_json_objects_with_stable_hashes():

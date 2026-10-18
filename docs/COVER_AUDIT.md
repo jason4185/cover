@@ -1,10 +1,12 @@
-# COVER V1 Adversarial Audit
+# COVER V1 Adversarial Audit and Phase 1 Remediation
 
 Audit date: 2026-10-17
 
 ## Scope and references
 
 This audit covers `contracts/cover.py`, the local host tests, and the V1 lifecycle. The installed `genlayer-dev:write-contract` skill was loaded first and used as the API and storage authority. GAVEL was the primary read-only reference for `gl.vm.run_nondet`, independent validator evaluation, raw evidence verification, and `_Recipient(...).emit_transfer(value=amount)`. PITCH was used as a secondary reference for bounded semantic output and deterministic settlement. Neither reference project was modified.
+
+Phase 1 adds a bounded reconsideration path to the local source. It is deployed and independently source-verified at the current V3 address `0x0982ebee0aA80Ed50c51903186ae5765e06879d8`. The historical V2 deployment does not contain the reconsideration methods.
 
 The required runner pin is:
 
@@ -30,6 +32,8 @@ Status: unresolved runner limitation.
 
 No unsafe automatic retry was added. The contract cannot safely distinguish an unresolved accepted transaction from a final failed transfer, so it cannot guarantee a retry without risking duplicate payment. This must be tested on the exact runner before live funding.
 
+The separate reconsideration closure race identified during the Phase 1 adversarial review is fixed in the local source. When eligible review evidence is committed before the three-day review deadline, closure is blocked until the additional 24-hour grace period ends. Reconsideration is allowed before that grace deadline, subject to the existing one-attempt and response-stage guards. At the exact grace deadline, reconsideration is closed and deterministic closure is allowed. No new grace period is created by a pending transaction or by stored evidence.
+
 #### H-02 — Required pinned runner validation is blocked
 
 Status: unresolved verification blocker, not a contract code defect.
@@ -38,7 +42,7 @@ Status: unresolved verification blocker, not a contract code defect.
 
 #### H-03 — Claimant evidence was not bound to the insured agent
 
-Status: fixed in source; deployed address remains unpatched.
+Status: fixed in the V3 source and deployment; the historical V2 address remains unpatched.
 
 The original contract placed the policy's `insured_agent_id` in the semantic prompt but did not compare it with the verified evidence JSON. A different agent could therefore receive `COVERED` if leader and validator independently made the same semantic mistake. The live `agent-01` versus `cover-test-agent-01` approval exposed this gap.
 
@@ -69,6 +73,14 @@ Previously, only the policyholder could invoke `adjudicate_claim`, even after th
 Status: unresolved by design and documented.
 
 A matching SHA-256 proves that fetched bytes match the claimant's or insurer's prior commitment. It does not authenticate who published the Netlify document, prove the incident occurred, prove the claimant timestamp, or prove causation. The semantic prompt states this limitation and treats all fetched fields and party statements as untrusted data. This is acceptable for the specified simulated V1 cases but not an oracle for real-world loss.
+
+#### M-05 — Review previously had no evidence correction path
+
+Status: corrected in the local Phase 1 source; requires redeployment.
+
+The earlier state machine opened `REVIEW_OPEN` for three days after `INSUFFICIENT_EVIDENCE`, but only allowed eventual closure. The new source adds one policyholder-only append-only review evidence commitment, one insurer review response or waiver, and one `reconsider_claim` call. Review evidence must use a different SHA-256 commitment from the original claimant evidence, but the contract does not claim that a changed hash proves authenticity or materiality. A finalized or waived review response can be reconsidered before the review deadline or during the fixed 24-hour grace period; if the insurer remains silent, the policyholder may proceed after the response deadline. The first verdict and reason are copied to `claim_initial_verdict` and `claim_initial_reason`; the original claimant and insurer commitments are not overwritten. A second insufficient result cannot open another review cycle. If review evidence was submitted but not reconsidered, closure is delayed through the grace period; after that bounded period the claim can close.
+
+The review run uses the same independent leader/validator proposal and deterministic identity gate as the first run. Its reserve and beneficiary rules are unchanged: a covered reconsideration creates the same fixed liability, while an unresolved or rejected result never pays automatically.
 
 ### Low
 
@@ -102,22 +114,24 @@ The evidence digest intentionally binds the ordered claimant/insurer roles and v
 - The insurer can submit one counterevidence commitment and must explicitly finalize it for immediate judgment, or waive the opportunity for immediate judgment. Without either action, the policyholder must wait for the response deadline. Silence is never approval and cannot be bypassed.
 - `COVERED` moves the fixed amount from reserve to outstanding liability. The AI cannot choose the amount, recipient, deadline, or accounting state.
 - `NOT_COVERED` closes judgment without compensation; reserve remains refundable only after expiration.
-- `INSUFFICIENT_EVIDENCE` opens a bounded review window with reserve locked. A participant can close the unresolved claim after review; refund remains unavailable until policy expiration.
+- `INSUFFICIENT_EVIDENCE` opens a bounded review window with reserve locked. The local Phase 1 source permits one append-only evidence correction with a distinct hash and one insurer review response or waiver. After the response stage, one participant may request one reconsideration. A second insufficient result stays in review until closure, and refund remains unavailable until all review obligations end and the policy expires. If review evidence is pending at the original deadline, closure waits through one additional 24-hour grace period; the grace period cannot extend itself.
 - Settlement uses the stored policyholder only, requires exactly the stored liability, clears liability, and marks the claim paid before the external transfer. Later settlement calls fail after committed state.
 - Refund requires the insurer, expiration, no duplicate refund, no open/ready/review/settlement-pending claim, and zero outstanding liability. It zeroes the reserve before the external transfer.
 
 Within committed contract state, duplicate payout/refund calls, unauthorized recipients, premature refunds, active-claim reserve release, and policyholder/insurer role confusion are rejected. Effects-first ordering limits reentrant-like duplicate execution. The remaining H-01 risk is exclusively the unobservable external transfer/finalization boundary.
 
+The frontend now keeps accepted transaction monitors at the application level instead of tying parent finalization and child-transfer reads to the review modal. It uses the verified SDK tracking, triggered-child lookup, and child finalization calls. Session storage contains only non-authoritative transaction identifiers and operation names for continuity; accepted contract reads and finalized receipts remain authoritative. A finalized parent or child execution is still not presented as proof that the beneficiary received GEN.
+
 ## Tests and verification
 
-Host tests include local Netlify fixtures for covered, excluded, insufficient, conflicting, and prompt-injection records; deterministic matching, mismatching, missing, malformed, and contradictory agent identity cases; static storage and API checks; adversarial raw evidence tests; canonical digest checks; independent leader/validator call-count checks; forged covered-result rejection; malformed model-output rejection; claimant fetch failure; lifecycle authorization/deadline/duplicate/refund checks; and settlement idempotence checks.
+Host tests include local Netlify fixtures for covered, excluded, insufficient, conflicting, and prompt-injection records; deterministic matching, mismatching, missing, malformed, and contradictory agent identity cases; static storage and API checks; adversarial raw evidence tests; canonical digest checks; independent leader/validator call-count checks; forged covered-result rejection; malformed model-output rejection; claimant fetch failure; lifecycle authorization/deadline/duplicate/refund checks; distinct review-hash, one-attempt, closure-grace, and reserve-preservation checks; and settlement idempotence checks. Frontend tests cover the matching closure/reconsideration boundary and persistent transfer-status classification.
 
 The new consensus tests use a small host-only SDK stub. They prove the contract helper behavior and validator independence, not genuine GenLayer consensus.
 
 Results for this audit run:
 
 - Python AST parse: passed for contract and test Python files.
-- Host/unit tests: passed, 18 passed with third-party pytest plugin autoload disabled because the installed GenLayer plugin requires Python 3.10+ while the available interpreter is Python 3.9.
+- Host/unit tests: passed, 19 passed and 16 skipped with third-party pytest plugin autoload disabled because the installed GenLayer plugin requires Python 3.10+ while the available interpreter is Python 3.9.
 - `genvm-lint lint contracts/cover.py --json`: passed.
 - `genvm-lint check contracts/cover.py --json`: blocked at SDK validation because the pinned runner archive is unavailable; lint portion passed.
 - Direct GenLayer VM lifecycle tests: blocked before deployment because the pinned runner hash is unavailable to `gltest`.
@@ -129,10 +143,10 @@ Results for this audit run:
 
 Views: `get_config`, `get_policy_count`, `get_claim_count`, `get_policy`, `get_claim`.
 
-Writes: `create_policy`, `file_claim`, `submit_insurer_response`, `finalize_insurer_response`, `waive_insurer_response`, `adjudicate_claim`, `close_insufficient_claim`, `settle_claim`, `refund_policy`.
+Writes: `create_policy`, `file_claim`, `submit_insurer_response`, `finalize_insurer_response`, `waive_insurer_response`, `adjudicate_claim`, `submit_review_evidence`, `submit_review_response`, `finalize_review_response`, `waive_review_response`, `reconsider_claim`, `close_insufficient_claim`, `settle_claim`, `refund_policy`.
 
 Storage uses scalar counters (`u256`) and typed `gl.storage.TreeMap` fields for policy and claim records. No `DynArray`, Python list, or other unsupported persistent container is used.
 
 ## Hash and size record
 
-The pre-remediation contract SHA-256 was `3cdfea839fe2a22354de64197f70e13cf7b6392580a39ed513d1c0c577316f65`. The final post-remediation SHA-256 is `83eae18df28aa965a284deea9a803da01c3d0473efefa1367a0a50d2c2406494`; the final UTF-8 source size is `34432` bytes.
+The previously deployed V2 source hash was `7f94aaf508d4fac944690e82fea188bb5ae588c8a14317f491450ad60875be42` at 36,774 UTF-8 bytes. The pre-remediation local Phase 1 source was `7f27969c743ca846d2cc718ccad3f40fcf9436360e3dde3404f1f86a9c2a96e5` at 45,822 UTF-8 bytes. The current V3 source is `70117df453be8ccdaed465df66ab4395d0fdb77115c041424e99f73e16ac6ad7` at 46,267 UTF-8 bytes and was verified byte-for-byte at `0x0982ebee0aA80Ed50c51903186ae5765e06879d8`.

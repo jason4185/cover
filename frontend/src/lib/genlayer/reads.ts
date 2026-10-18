@@ -22,6 +22,18 @@ type RecordValue = Record<string, unknown>;
 const MAX_SCAN_RECORDS = 100;
 const CHUNK_SIZE = 12;
 
+function optionalString(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function optionalBoolean(value: unknown): boolean {
+  return typeof value === "boolean" ? value : false;
+}
+
+function optionalNumber(value: unknown): number {
+  return value === undefined ? 0 : asNumber(value, "optional contract value");
+}
+
 function record(value: unknown, field: string): RecordValue {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error(`Contract returned an invalid ${field}.`);
@@ -104,6 +116,18 @@ function mapClaim(raw: unknown): CoverClaim {
       value.last_settlement_at,
       "last settlement time",
     ),
+    initialVerdict: optionalString(value.initial_verdict) as Verdict | "",
+    initialReasonCode: optionalString(value.initial_reason_code),
+    reviewAttempts: optionalNumber(value.review_attempts),
+    reviewEvidenceUrl: optionalString(value.review_evidence_url),
+    reviewEvidenceSha256: optionalString(value.review_evidence_sha256),
+    reviewEvidenceSubmitted: optionalBoolean(value.review_evidence_submitted),
+    reviewResponse: optionalString(value.review_response),
+    reviewResponseUrl: optionalString(value.review_response_url),
+    reviewResponseSha256: optionalString(value.review_response_sha256),
+    reviewResponseSubmitted: optionalBoolean(value.review_response_submitted),
+    reviewResponseWaived: optionalBoolean(value.review_response_waived),
+    reviewResponseFinalized: optionalBoolean(value.review_response_finalized),
   };
 }
 
@@ -129,6 +153,11 @@ export async function readConfig(): Promise<CoverConfig> {
     policyStates: strings(raw.policy_states, "policy state"),
     claimStates: strings(raw.claim_states, "claim state"),
     evidenceHost: asString(raw.evidence_host, "evidence host"),
+    supportsReconsideration: raw.supports_reconsideration === true,
+    reviewAttemptLimit:
+      raw.review_attempt_limit === undefined
+        ? 0
+        : asNumber(raw.review_attempt_limit, "review attempt limit"),
   };
 }
 

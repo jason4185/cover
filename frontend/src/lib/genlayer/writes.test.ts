@@ -26,7 +26,7 @@ describe("COVER write builders", () => {
     );
     expect(request.tx).toMatchObject({
       kind: "write",
-      address: "0x12EbF0972C27266231e7f0b1c8cc6A20efCC44Fa",
+      address: "0x0982ebee0aA80Ed50c51903186ae5765e06879d8",
       method: "create_policy",
     });
     expect(request.tx.args).toHaveLength(6);

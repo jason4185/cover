@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   canAdjudicateClaim,
+  canCloseInsufficientClaim,
   canFileClaim,
+  canReconsiderClaim,
   canRefundPolicy,
   canSubmitInsurerResponse,
+  canSubmitReviewEvidence,
 } from "./permissions";
 import type { CoverClaim, CoverPolicy } from "./types";
 
@@ -48,6 +51,18 @@ const claim: CoverClaim = {
   status: "RESPONSE_OPEN",
   settlementAttempts: 0,
   lastSettlementAt: 0,
+  initialVerdict: "",
+  initialReasonCode: "",
+  reviewAttempts: 0,
+  reviewEvidenceUrl: "",
+  reviewEvidenceSha256: "",
+  reviewEvidenceSubmitted: false,
+  reviewResponse: "",
+  reviewResponseUrl: "",
+  reviewResponseSha256: "",
+  reviewResponseSubmitted: false,
+  reviewResponseWaived: false,
+  reviewResponseFinalized: false,
 };
 
 describe("permission-based action visibility", () => {
@@ -75,5 +90,129 @@ describe("permission-based action visibility", () => {
       ),
     ).toBe(false);
     expect(canRefundPolicy(policy, undefined, holder, 1001)).toBe(false);
+  });
+
+  it("requires review evidence and keeps reconsideration to one attempt", () => {
+    const reviewClaim = {
+      ...claim,
+      status: "REVIEW_OPEN" as const,
+      reviewDeadline: 1_000,
+    };
+    expect(canSubmitReviewEvidence(reviewClaim, policy, holder, 900)).toBe(
+      true,
+    );
+    expect(canSubmitReviewEvidence(reviewClaim, policy, insurer, 900)).toBe(
+      false,
+    );
+    expect(canReconsiderClaim(reviewClaim, policy, holder, 900)).toBe(false);
+    expect(
+      canReconsiderClaim(
+        {
+          ...reviewClaim,
+          reviewEvidenceSubmitted: true,
+          reviewResponseWaived: true,
+          reviewResponseFinalized: true,
+        },
+        policy,
+        holder,
+        900,
+      ),
+    ).toBe(true);
+    expect(
+      canReconsiderClaim(
+        {
+          ...reviewClaim,
+          reviewEvidenceSubmitted: true,
+        },
+        policy,
+        holder,
+        1_001,
+      ),
+    ).toBe(true);
+    expect(
+      canReconsiderClaim(
+        {
+          ...reviewClaim,
+          reviewEvidenceSubmitted: true,
+          reviewResponseWaived: true,
+          reviewResponseFinalized: true,
+        },
+        policy,
+        holder,
+        1_001,
+      ),
+    ).toBe(true);
+    expect(
+      canReconsiderClaim(
+        {
+          ...reviewClaim,
+          reviewAttempts: 1,
+          reviewEvidenceSubmitted: true,
+          reviewResponseWaived: true,
+          reviewResponseFinalized: true,
+        },
+        policy,
+        holder,
+        900,
+      ),
+    ).toBe(false);
+    expect(
+      canCloseInsufficientClaim(
+        {
+          ...reviewClaim,
+          reviewEvidenceSubmitted: true,
+        },
+        policy,
+        insurer,
+        1_000,
+      ),
+    ).toBe(false);
+    expect(
+      canCloseInsufficientClaim(
+        {
+          ...reviewClaim,
+          reviewEvidenceSubmitted: true,
+        },
+        policy,
+        insurer,
+        1_000 + 24 * 60 * 60 - 1,
+      ),
+    ).toBe(false);
+    expect(
+      canReconsiderClaim(
+        {
+          ...reviewClaim,
+          reviewEvidenceSubmitted: true,
+        },
+        policy,
+        holder,
+        1_000 + 24 * 60 * 60 - 1,
+      ),
+    ).toBe(true);
+    expect(
+      canCloseInsufficientClaim(
+        {
+          ...reviewClaim,
+          reviewEvidenceSubmitted: true,
+        },
+        policy,
+        insurer,
+        1_000 + 24 * 60 * 60,
+      ),
+    ).toBe(true);
+    expect(
+      canReconsiderClaim(
+        {
+          ...reviewClaim,
+          reviewEvidenceSubmitted: true,
+        },
+        policy,
+        holder,
+        1_000 + 24 * 60 * 60,
+      ),
+    ).toBe(false);
+    expect(canCloseInsufficientClaim(reviewClaim, policy, insurer, 1_001)).toBe(
+      true,
+    );
   });
 });

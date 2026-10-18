@@ -1,4 +1,5 @@
 const GEN_BASE = 10n ** 18n;
+export const U256_MAX = (1n << 256n) - 1n;
 
 export function asBigInt(value: unknown, field: string): bigint {
   if (typeof value === "bigint") return value;
@@ -54,7 +55,11 @@ export function parseGenAmount(value: string): bigint {
     );
   }
   const [whole = "0", fraction = ""] = normalized.split(".");
-  return BigInt(whole) * GEN_BASE + BigInt(fraction.padEnd(18, "0") || "0");
+  const result =
+    BigInt(whole) * GEN_BASE + BigInt(fraction.padEnd(18, "0") || "0");
+  if (result > U256_MAX)
+    throw new Error("The GEN amount is too large for the contract.");
+  return result;
 }
 
 export function formatAddress(value: string): string {
